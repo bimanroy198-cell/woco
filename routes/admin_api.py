@@ -88,21 +88,30 @@ def publish_release():
         changelog = request.form.get("changelog", "")
         force_update = request.form.get("force_update") == "true"
         
+        apk_url = request.form.get("apk_url")
         apk_file = request.files.get("apk_file")
-        if not apk_file:
-            return jsonify({"success": False, "message": "APK missing"}), 400
-            
-        filename = secure_filename(apk_file.filename)
-        upload_dir = os.path.join(os.getcwd(), 'uploads')
-        os.makedirs(upload_dir, exist_ok=True)
-        save_path = os.path.join(upload_dir, filename)
-        apk_file.save(save_path)
         
-        sha256_hash = hashlib.sha256()
-        with open(save_path, "rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
-        sha256 = sha256_hash.hexdigest()
+        if not apk_url and not apk_file:
+            return jsonify({"success": False, "message": "APK URL or APK File missing"}), 400
+            
+        final_apk_url = apk_url
+        sha256 = "N/A"
+        filename = f"woco_v{version_name}.apk"
+        
+        if not final_apk_url and apk_file:
+            # Local saving (Will crash on Vercel read-only FS, but keeping for local testing)
+            filename = secure_filename(apk_file.filename)
+            upload_dir = os.path.join(os.getcwd(), 'uploads')
+            os.makedirs(upload_dir, exist_ok=True)
+            save_path = os.path.join(upload_dir, filename)
+            apk_file.save(save_path)
+            
+            sha256_hash = hashlib.sha256()
+            with open(save_path, "rb") as f:
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+            sha256 = sha256_hash.hexdigest()
+            final_apk_url = f"/uploads/{filename}"
         
         app_updates_collection.insert_one({
             "platform": "android",
@@ -110,7 +119,7 @@ def publish_release():
             "version_name": version_name,
             "changelog": changelog,
             "force_update": force_update,
-            "apk_url": f"/uploads/{filename}",
+            "apk_url": final_apk_url,
             "sha256": sha256,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
@@ -120,6 +129,27 @@ def publish_release():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@admin_api_bp.route("/api/admin/publish/delete", methods=["DELETE"])
+def admin_delete_release():
+    if not session.get("api_admin_email"):
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    
+    data = request.json or {}
+    release_id = data.get("id")
+    if not release_id:
+        return jsonify({"success": False, "message": "Release ID required"}), 400
+        
+    from bson.objectid import ObjectId
+    try:
+        result = app_updates_collection.delete_one({"_id": ObjectId(release_id)})
+        if result.deleted_count > 0:
+            log_admin_action(session.get("api_admin_email"), "DELETE_RELEASE", "system", True, {"id": release_id})
+            return jsonify({"success": True, "message": "Release permanently deleted."})
+        else:
+            return jsonify({"success": False, "message": "Release not found."}), 404
+    except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
 @admin_api_bp.route("/api/admin/cms", methods=["POST"])
