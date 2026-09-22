@@ -129,8 +129,8 @@ def verify_otp():
                 return jsonify({"success": True, "exists": True, "blocked": True, "deleted": is_deleted, "message": "Your account has been blocked by Admin."}), 200
             
             if is_deleted:
-                # Return HTTP 200 so Retrofit onResponse handles it properly
-                return jsonify({"success": True, "exists": True, "blocked": False, "deleted": True, "message": "Your account is deleted."}), 200
+                # Account deleted, treat as non-existent to allow re-registration
+                return jsonify({"success": True, "exists": False, "blocked": False, "deleted": False}), 200
 
             # Update last_login
             now_iso = datetime.utcnow().isoformat()
@@ -223,10 +223,10 @@ def google_login():
             }), 200
         
         if is_deleted:
+            # Account deleted, treat as non-existent to allow re-registration
             return jsonify({
-                "success": True, "exists": True,
-                "blocked": False, "deleted": True,
-                "message": "Your account is deleted."
+                "success": True, "exists": False,
+                "blocked": False, "deleted": False
             }), 200
         
         # Update last_login
